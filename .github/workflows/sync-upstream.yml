@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   sync:
@@ -21,26 +22,27 @@ jobs:
           git remote add upstream https://github.com/duckdb/duckdb.git || true
           git fetch upstream --tags
 
-      - name: Check for new tags
+      - name: Check for new release
         id: check
         run: |
-          LATEST=$(git tag -l 'v*' --sort=-v:refname | head -1)
-          LATEST_RISCV=$(gh release list --json tagName --jq '.[].tagName' | grep riscv64 | head -1 | sed 's/-riscv64//')
-          echo "latest_upstream=$LATEST" >> "$GITHUB_OUTPUT"
+          LATEST=$(git tag -l 'v*.*.*' --sort=-v:refname | grep -v rc | head -1)
+          LATEST_RISCV=$(gh release list --json tagName --jq '.[].tagName' 2>/dev/null | grep riscv64 | head -1 | sed 's/-riscv64//' || echo "none")
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
           echo "latest_riscv=$LATEST_RISCV" >> "$GITHUB_OUTPUT"
           if [ "$LATEST" != "$LATEST_RISCV" ]; then
-            echo "new_release=true" >> "$GITHUB_OUTPUT"
-            echo "New upstream release: $LATEST (our latest: $LATEST_RISCV)"
+            echo "new=true" >> "$GITHUB_OUTPUT"
+            echo "New: $LATEST (our latest: $LATEST_RISCV)"
           else
-            echo "new_release=false" >> "$GITHUB_OUTPUT"
+            echo "new=false" >> "$GITHUB_OUTPUT"
             echo "Up to date: $LATEST"
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push new tag
-        if: steps.check.outputs.new_release == 'true'
+      - name: Trigger riscv64 release build
+        if: steps.check.outputs.new == 'true'
         run: |
-          TAG=${{ steps.check.outputs.latest_upstream }}
-          git push origin "refs/tags/${TAG}"
-          echo "Pushed tag $TAG - riscv64 release workflow should trigger"
+          gh workflow run riscv64-release.yml -f tag=${{ steps.check.outputs.latest }}
+          echo "Triggered riscv64 build for ${{ steps.check.outputs.latest }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
