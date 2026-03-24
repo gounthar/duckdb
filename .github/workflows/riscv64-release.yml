@@ -61,10 +61,40 @@ jobs:
             build/duckdb-linux-riscv64.tar.gz
             build/duckdb-linux-riscv64.tar.gz.sha256
 
+  build-python:
+    name: Build DuckDB Python wheel (riscv64)
+    runs-on: ubuntu-24.04-riscv
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build python3-dev python3-pip python3-venv
+
+      - name: Build wheel
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install pip setuptools wheel
+          cd tools/pythonpkg
+          python setup.py sdist bdist_wheel
+          ls -la dist/
+
+      - name: Upload wheel to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}-riscv64
+          name: "DuckDB ${{ env.TAG }} (riscv64)"
+          files: tools/pythonpkg/dist/*.whl
+
   build-docker:
     name: Build Docker image (riscv64)
     runs-on: ubuntu-24.04-riscv
-    needs: build-cli
+    needs: [build-cli, build-python]
     steps:
       - uses: actions/checkout@v6
         with:
