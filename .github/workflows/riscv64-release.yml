@@ -1,0 +1,115 @@
+name: RISC-V 64 Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Upstream tag to build (e.g. v1.5.1)'
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  build-cli:
+    name: Build DuckDB CLI (riscv64)
+    runs-on: ubuntu-24.04-riscv
+    env:
+      RUSTUP_HOME: /home/runner/.rustup
+      CARGO_HOME: /home/runner/.cargo
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build python3
+
+      - name: Build
+        run: |
+          mkdir build
+          cd build
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
+          time ninja duckdb
+
+      - name: Package
+        run: |
+          cd build
+          strip duckdb
+          tar -czvf duckdb-linux-riscv64.tar.gz duckdb
+          sha256sum duckdb-linux-riscv64.tar.gz > duckdb-linux-riscv64.tar.gz.sha256
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}-riscv64
+          name: "DuckDB ${{ env.TAG }} (riscv64)"
+          body: |
+            Unofficial riscv64 build of DuckDB ${{ env.TAG }}.
+            Built on native RISE riscv64 runner (Scaleway EM-RV1).
+            Upstream: https://github.com/duckdb/duckdb/releases/tag/${{ env.TAG }}
+          files: |
+            build/duckdb-linux-riscv64.tar.gz
+            build/duckdb-linux-riscv64.tar.gz.sha256
+
+  build-docker:
+    name: Build Docker image (riscv64)
+    runs-on: ubuntu-24.04-riscv
+    needs: build-cli
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Build and push
+        run: |
+          # Build CLI first
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build python3
+          mkdir build && cd build
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
+          ninja duckdb
+          strip duckdb
+          cd ..
+
+          # Create minimal Dockerfile
+          cat > Dockerfile.riscv64 << 'EOF'
+          FROM debian:trixie-slim
+          COPY build/duckdb /usr/local/bin/duckdb
+          ENTRYPOINT ["duckdb"]
+          EOF
+
+          # Build and push
+          VERSION="${TAG#v}"
+          docker build -f Dockerfile.riscv64 -t ghcr.io/gounthar/duckdb:${VERSION}-riscv64 -t ghcr.io/gounthar/duckdb:latest-riscv64 .
+          docker push ghcr.io/gounthar/duckdb:${VERSION}-riscv64
+          docker push ghcr.io/gounthar/duckdb:latest-riscv64
+
+          # Docker Hub (if credentials available)
+          docker tag ghcr.io/gounthar/duckdb:${VERSION}-riscv64 gounthar/duckdb:${VERSION}-riscv64 2>/dev/null && \
+          docker push gounthar/duckdb:${VERSION}-riscv64 2>/dev/null || true
+          docker tag ghcr.io/gounthar/duckdb:latest-riscv64 gounthar/duckdb:latest-riscv64 2>/dev/null && \
+          docker push gounthar/duckdb:latest-riscv64 2>/dev/null || true

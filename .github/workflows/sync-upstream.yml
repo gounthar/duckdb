@@ -1,0 +1,46 @@
+name: Sync upstream releases
+
+on:
+  schedule:
+    - cron: '17 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream tags
+        run: |
+          git remote add upstream https://github.com/duckdb/duckdb.git || true
+          git fetch upstream --tags
+
+      - name: Check for new tags
+        id: check
+        run: |
+          LATEST=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          LATEST_RISCV=$(gh release list --json tagName --jq '.[].tagName' | grep riscv64 | head -1 | sed 's/-riscv64//')
+          echo "latest_upstream=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "latest_riscv=$LATEST_RISCV" >> "$GITHUB_OUTPUT"
+          if [ "$LATEST" != "$LATEST_RISCV" ]; then
+            echo "new_release=true" >> "$GITHUB_OUTPUT"
+            echo "New upstream release: $LATEST (our latest: $LATEST_RISCV)"
+          else
+            echo "new_release=false" >> "$GITHUB_OUTPUT"
+            echo "Up to date: $LATEST"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push new tag
+        if: steps.check.outputs.new_release == 'true'
+        run: |
+          TAG=${{ steps.check.outputs.latest_upstream }}
+          git push origin "refs/tags/${TAG}"
+          echo "Pushed tag $TAG - riscv64 release workflow should trigger"
