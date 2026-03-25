@@ -42,7 +42,7 @@ jobs:
       - name: Trigger riscv64 release build
         if: steps.check.outputs.new == 'true'
         run: |
-          gh workflow run riscv64-release.yml -f tag=${{ steps.check.outputs.latest }}
+          gh workflow run riscv64-release.yml --repo ${{ github.repository }} -f tag=${{ steps.check.outputs.latest }}
           echo "Triggered riscv64 build for ${{ steps.check.outputs.latest }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
